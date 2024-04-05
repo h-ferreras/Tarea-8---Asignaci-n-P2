@@ -1,8 +1,11 @@
+import 'dart:io';
+//Harvey Ferreras 20197792
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:cached_network_image/cached_network_image.dart';
-
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart';
 
 void main() {
   runApp(MyApp());
@@ -12,345 +15,161 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Tarea 6',
+      title: 'Registro de Eventos',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
       home: HomePage(),
-      
     );
   }
 }
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
+  @override
+  _HomePageState createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  late File _imageFile;
+  late String _audioPath;
+  late Database _database;
+  late final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+    _initializeDatabase();
+    _imageFile = File(''); 
+    _audioPath = '';
+  }
+
+  Future<void> _initializeDatabase() async {
+    Directory documentsDirectory = await getApplicationDocumentsDirectory();
+    String path = join(documentsDirectory.path, 'events.db');
+    _database = await openDatabase(path, version: 1,
+        onCreate: (Database db, int version) async {
+      await db.execute('''
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY,
+          title TEXT,
+          description TEXT,
+          imagePath TEXT,
+          audioPath TEXT
+        )
+      ''');
+    });
+  }
+
+  Future<void> _addEvent() async {
+    if (_formKey.currentState!.validate()) {
+      await _database.transaction((txn) async {
+        await txn.rawInsert(
+            'INSERT INTO events(title, description, imagePath, audioPath) VALUES("${_titleController.text}", "${_descriptionController.text}", "${_imageFile.path}", "$_audioPath")');
+      });
+      _titleController.clear();
+      _descriptionController.clear();
+      _imageFile = File(''); // Limpia
+      _audioPath = '';
+      _scaffoldMessengerKey.currentState?.showSnackBar(SnackBar(
+        content: Text('Evento agregado con éxito'),
+      ));
+      setState(() {}); // Actualiza :)
+    }
+  }
+//Harvey Ferreras 20197792
+  Future<void> _pickImage() async {
+    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _imageFile = File(pickedFile.path);
+      });
+    }
+  }
+
+  Future<void> _pickAudio() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      allowMultiple: false,
+    );
+
+    if (result != null) {
+      _audioPath = result.files.single.path!;
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Aplicacion Caja de Herremientas :)'),
+        title: Text('Registro de Eventos'),
       ),
       body: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            
-            Image.network('assets/caja.jpg'),
-
-            
-            GenderPredictionWidget(),
-
-            
-            AgePredictionWidget(),
-
-            
-            UniversitiesWidget(),
-
-            
-            WeatherWidget(),
-
-            
-            WordPressNewsWidget(),
-
-            
-            AboutWidget(),
-          ],
+        padding: EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              TextFormField(
+                controller: _titleController,
+                decoration: InputDecoration(labelText: 'Título'),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Por favor ingresa un título';
+                  }
+                  return null;
+                },
+              ),
+              TextFormField(
+                controller: _descriptionController,
+                decoration: InputDecoration(labelText: 'Descripción'),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Por favor ingresa una descripción';
+                  }
+                  return null;
+                },
+              ),
+              SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _pickImage,
+                child: Text('Seleccionar Imagen'),
+              ),
+              SizedBox(height: 20),
+              _imageFile != null
+                  ? Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        image: DecorationImage(
+                          image: FileImage(_imageFile),
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    )
+                  : SizedBox(), 
+              SizedBox(height: 20),
+              _audioPath.isNotEmpty
+                  ? Text('Audio seleccionado: $_audioPath')
+                  : ElevatedButton(
+                      onPressed: _pickAudio,
+                      child: Text('Seleccionar Audio'),
+                    ),
+              SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _addEvent,
+                child: Text('Guardar Evento'),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
-
-class GenderPredictionWidget extends StatefulWidget {
-  @override
-  _GenderPredictionWidgetState createState() => _GenderPredictionWidgetState();
-}
-
-class _GenderPredictionWidgetState extends State<GenderPredictionWidget> {
-  TextEditingController _nameController = TextEditingController();
-  String _gender = '';
-
-  Future<void> predictGender() async {
-    String name = _nameController.text;
-    String apiUrl = 'https://api.genderize.io/?name=$name';
-
-    try {
-      final response = await http.get(Uri.parse(apiUrl));
-      if (response.statusCode == 200) {
-        Map<String, dynamic> data = json.decode(response.body);
-        String gender = data['gender'] ?? '';
-
-        setState(() {
-          _gender = gender;
-        });
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TextField(
-          controller: _nameController,
-          decoration: InputDecoration(labelText: 'Ingrese un nombre'),
-        ),
-        ElevatedButton(
-          onPressed: () => predictGender(),
-          child: Text('Predecir Género'),
-        ),
-        _gender.isNotEmpty
-            ? Container(
-                child: _gender.toLowerCase() == 'male'
-                    ? Text('Género: Masculino', style: TextStyle(color: Colors.blue))
-                    : Text('Género: Femenino', style: TextStyle(color: Colors.pink)),
-              )
-            : Container(),
-      ],
-    );
-  }
-}
-
-class AgePredictionWidget extends StatefulWidget {
-  @override
-  _AgePredictionWidgetState createState() => _AgePredictionWidgetState();
-}
-
-class _AgePredictionWidgetState extends State<AgePredictionWidget> {
-  TextEditingController _nameController = TextEditingController();
-  int _age = 0;
-
-  Future<void> predictAge() async {
-    String name = _nameController.text;
-    String apiUrl = 'https://api.agify.io/?name=$name';
-
-    try {
-      final response = await http.get(Uri.parse(apiUrl));
-      if (response.statusCode == 200) {
-        Map<String, dynamic> data = json.decode(response.body);
-        int age = data['age'] ?? 0;
-
-        setState(() {
-          _age = age;
-        });
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TextField(
-          controller: _nameController,
-          decoration: InputDecoration(labelText: 'Ingrese un nombre'),
-        ),
-        ElevatedButton(
-          onPressed: () => predictAge(),
-          child: Text('Predecir Edad'),
-        ),
-        _age > 0
-            ?  Container(
-              child: Column(
-                children: [
-                  Text('Edad: $_age'),
-                  if (_age < 18)
-                    Image.asset('assets/nino.jpg')
-                  else if (_age < 65)
-                    Image.asset('assets/adulto.jpg')
-                  else
-                    Image.asset('assets/viejo.jpg'),
-                ],
-              ),
-            )
-            : Container(),
-      ],
-    );
-  }
-}
-
-class UniversitiesWidget extends StatefulWidget {
-  @override
-  _UniversitiesWidgetState createState() => _UniversitiesWidgetState();
-}
-
-class _UniversitiesWidgetState extends State<UniversitiesWidget> {
-  TextEditingController _countryController = TextEditingController();
-  List<University> _universities = [];
-
-  Future<void> fetchUniversities() async {
-    String country = _countryController.text;
-    String apiUrl = 'http://universities.hipolabs.com/search?country=$country';
-
-    try {
-      final response = await http.get(Uri.parse(apiUrl));
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        List<University> universities = data.map((e) => University.fromJson(e)).toList();
-
-        setState(() {
-          _universities = universities;
-        });
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        TextField(
-          controller: _countryController,
-          decoration: InputDecoration(labelText: 'Ingrese un país en inglés'),
-        ),
-        ElevatedButton(
-          onPressed: () => fetchUniversities(),
-          child: Text('Mostrar Universidades'),
-        ),
-        if (_universities.isNotEmpty)
-          Column(
-            children: _universities
-                .map(
-                  (uni) => ListTile(
-                    title: Text(uni.name),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Dominio: ${uni.domains.join(', ')}'),
-                        Text('Link: ${uni.webPages.join(', ')}'),
-                      ],
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-      ],
-    );
-  }
-}
-
-class University {
-  final String name;
-  final List<String> domains;
-  final List<String> webPages;
-
-  University({
-    required this.name,
-    required this.domains,
-    required this.webPages,
-  });
-
-  factory University.fromJson(Map<String, dynamic> json) {
-    return University(
-      name: json['name'] ?? '',
-      domains: List<String>.from(json['domains'] ?? []),
-      webPages: List<String>.from(json['web_pages'] ?? []),
-    );
-  }
-}
-
-class WeatherWidget extends StatefulWidget {
-  @override
-  _WeatherWidgetState createState() => _WeatherWidgetState();
-}
-
-class _WeatherWidgetState extends State<WeatherWidget> {
- 
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(); 
-  }
-}
-
-
-class WordPressNewsWidget extends StatefulWidget {
-  @override
-  _WordPressNewsWidgetState createState() => _WordPressNewsWidgetState();
-}
-
-class _WordPressNewsWidgetState extends State<WordPressNewsWidget> {
-  List<News> _newsList = [];
-
-  Future<void> getWordPressNews() async {
-    String apiUrl = 'https://www.teamviewer.com/en-us/';
-
-    try {
-      final response = await http.get(Uri.parse(apiUrl));
-      if (response.statusCode == 200) {
-    
-        List<dynamic> data = json.decode(response.body);
-        List<News> newsList = data.map((e) => News.fromJson(e)).toList();
-
-        setState(() {
-          _newsList = newsList;
-        });
-      } else {
-        print('Error al obtener las noticias: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error al obtener las noticias: $e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        ElevatedButton(
-          onPressed: () => getWordPressNews(),
-          child: Text('Obtener Noticias de WordPress'),
-        ),
-        _newsList.isNotEmpty
-            ? Column(
-                children: _newsList
-                    .map((news) => ListTile(
-                          title: Text(news.title),
-                          subtitle: Text(news.summary),
-                          onTap: () {
-                   
-                          },
-                        ))
-                    .toList(),
-              )
-            : Container(),
-      ],
-    );
-  }
-}
-
-class News {
-  final String title;
-  final String summary;
-  final String link;
-
-  News({
-    required this.title,
-    required this.summary,
-    required this.link,
-  });
-
-  factory News.fromJson(Map<String, dynamic> json) {
-    return News(
-      title: json['title'] ?? '',
-      summary: json['summary'] ?? '',
-      link: json['link'] ?? '',
-    );
-  }
-}
-
-class AboutWidget extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text('Harvey Ferreras harveyferreras@gmail.com'),
-      ],
-    );
-  }
-}
+//Harvey Ferreras 20197792
